@@ -31,65 +31,65 @@ impl GameState {
     }
 
     fn read_input(&mut self) -> io::Result<bool> {
-        let stdin = io::stdin();
-        let mut lines = stdin.lock().lines();
+        let mut line = String::new();
 
         // Read player number if first turn
         if self.player_num == 0 {
-            if let Some(Ok(line)) = lines.next() {
-                if line.contains("p1") {
-                    self.player_num = 1;
-                } else if line.contains("p2") {
-                    self.player_num = 2;
-                } else {
-                    return Ok(false);
-                }
+            line.clear();
+            if io::stdin().read_line(&mut line)? == 0 {
+                return Ok(false);
+            }
+            if line.contains("p1") {
+                self.player_num = 1;
+            } else if line.contains("p2") {
+                self.player_num = 2;
             } else {
                 return Ok(false);
             }
         }
 
         // Read board
-        if let Some(Ok(line)) = lines.next() {
-            if line.starts_with("Anfield") || line.starts_with("Plateau") {
-                let parts: Vec<&str> = line.split_whitespace().collect();
-                if parts.len() >= 3 {
-                    self.board_height = parts[1].parse().unwrap_or(0);
-                    self.board_width = parts[2].trim_end_matches(':').parse().unwrap_or(0);
-                }
-            } else {
-                return Ok(false);
+        line.clear();
+        if io::stdin().read_line(&mut line)? == 0 {
+            return Ok(false);
+        }
+        if line.starts_with("Plateau") {
+            let parts: Vec<&str> = line.split_whitespace().collect();
+            if parts.len() >= 3 {
+                self.board_height = parts[1].parse().unwrap_or(0);
+                self.board_width = parts[2].trim_end_matches(':').parse().unwrap_or(0);
             }
         } else {
             return Ok(false);
         }
 
         // Skip column numbers line
-        if lines.next().is_none() {
+        line.clear();
+        if io::stdin().read_line(&mut line)? == 0 {
             return Ok(false);
         }
 
         // Read board rows
         self.board.clear();
         for _ in 0..self.board_height {
-            if let Some(Ok(line)) = lines.next() {
-                let row: Vec<char> = line.chars().skip(4).collect();
-                self.board.push(row);
-            } else {
+            line.clear();
+            if io::stdin().read_line(&mut line)? == 0 {
                 return Ok(false);
             }
+            let row: Vec<char> = line.chars().skip(4).take(self.board_width).collect();
+            self.board.push(row);
         }
 
         // Read piece
-        if let Some(Ok(line)) = lines.next() {
-            if line.starts_with("Piece") {
-                let parts: Vec<&str> = line.split_whitespace().collect();
-                if parts.len() >= 3 {
-                    self.piece_height = parts[1].parse().unwrap_or(0);
-                    self.piece_width = parts[2].trim_end_matches(':').parse().unwrap_or(0);
-                }
-            } else {
-                return Ok(false);
+        line.clear();
+        if io::stdin().read_line(&mut line)? == 0 {
+            return Ok(false);
+        }
+        if line.starts_with("Piece") {
+            let parts: Vec<&str> = line.split_whitespace().collect();
+            if parts.len() >= 3 {
+                self.piece_height = parts[1].parse().unwrap_or(0);
+                self.piece_width = parts[2].trim_end_matches(':').parse().unwrap_or(0);
             }
         } else {
             return Ok(false);
@@ -98,12 +98,12 @@ impl GameState {
         // Read piece rows
         self.piece.clear();
         for _ in 0..self.piece_height {
-            if let Some(Ok(line)) = lines.next() {
-                let row: Vec<char> = line.chars().collect();
-                self.piece.push(row);
-            } else {
+            line.clear();
+            if io::stdin().read_line(&mut line)? == 0 {
                 return Ok(false);
             }
+            let row: Vec<char> = line.chars().take(self.piece_width).collect();
+            self.piece.push(row);
         }
 
         Ok(true)
@@ -239,22 +239,26 @@ impl GameState {
 }
 
 fn main() {
+    use std::io::Write;
     let mut game = GameState::new();
 
     loop {
         match game.read_input() {
             Ok(true) => {
                 let best_move = game.find_best_move();
-                println!("{} {}", best_move.x, best_move.y);
+                println!("{} {}", best_move.y, best_move.x);
+                io::stdout().flush().unwrap();
             }
             Ok(false) => {
                 // End of input or error
                 println!("0 0");
+                io::stdout().flush().unwrap();
                 break;
             }
             Err(_) => {
                 // Error reading input
                 println!("0 0");
+                io::stdout().flush().unwrap();
                 break;
             }
         }

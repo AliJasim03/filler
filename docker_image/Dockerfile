@@ -8,4 +8,4 @@ COPY ./m1_game_engine	    /filler/m1_game_engine
 
 WORKDIR /filler/
 
-ENTRYPOINT /bin/bash
+ENTRYPOINT ["/bin/bash"]

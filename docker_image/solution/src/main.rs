@@ -1,4 +1,4 @@
-use std::io::{self, BufRead};
+use std::io;
 
 #[derive(Debug, Clone)]
 struct Position {
@@ -37,27 +37,34 @@ impl GameState {
         if self.player_num == 0 {
             line.clear();
             if io::stdin().read_line(&mut line)? == 0 {
+                eprintln!("DEBUG: EOF reading player number");
                 return Ok(false);
             }
+            eprintln!("DEBUG: Player line: {}", line.trim());
             if line.contains("p1") {
                 self.player_num = 1;
             } else if line.contains("p2") {
                 self.player_num = 2;
             } else {
+                eprintln!("DEBUG: Failed to parse player number");
                 return Ok(false);
             }
+            eprintln!("DEBUG: Player number set to {}", self.player_num);
         }
 
         // Read board
         line.clear();
         if io::stdin().read_line(&mut line)? == 0 {
+            eprintln!("DEBUG: EOF reading board header");
             return Ok(false);
         }
-        if line.starts_with("Plateau") {
+        eprintln!("DEBUG: Board line: {}", line.trim());
+        if line.starts_with("Plateau") || line.starts_with("Anfield") {
             let parts: Vec<&str> = line.split_whitespace().collect();
             if parts.len() >= 3 {
-                self.board_height = parts[1].parse().unwrap_or(0);
-                self.board_width = parts[2].trim_end_matches(':').parse().unwrap_or(0);
+                // Format is "Anfield WIDTH HEIGHT:" or "Plateau WIDTH HEIGHT:"
+                self.board_width = parts[1].parse().unwrap_or(0);
+                self.board_height = parts[2].trim_end_matches(':').parse().unwrap_or(0);
             }
         } else {
             return Ok(false);
@@ -88,8 +95,9 @@ impl GameState {
         if line.starts_with("Piece") {
             let parts: Vec<&str> = line.split_whitespace().collect();
             if parts.len() >= 3 {
-                self.piece_height = parts[1].parse().unwrap_or(0);
-                self.piece_width = parts[2].trim_end_matches(':').parse().unwrap_or(0);
+                // Format is "Piece WIDTH HEIGHT:" - parts[1] is width, parts[2] is height
+                self.piece_width = parts[1].parse().unwrap_or(0);
+                self.piece_height = parts[2].trim_end_matches(':').parse().unwrap_or(0);
             }
         } else {
             return Ok(false);
@@ -102,7 +110,7 @@ impl GameState {
             if io::stdin().read_line(&mut line)? == 0 {
                 return Ok(false);
             }
-            let row: Vec<char> = line.chars().take(self.piece_width).collect();
+            let row: Vec<char> = line.trim_end().chars().take(self.piece_width).collect();
             self.piece.push(row);
         }
 
@@ -110,10 +118,12 @@ impl GameState {
     }
 
     fn my_char(&self) -> char {
+        // Lowercase: last placed piece
         if self.player_num == 1 { 'a' } else { 's' }
     }
 
     fn my_territory_char(&self) -> char {
+        // Uppercase: older territory
         if self.player_num == 1 { '@' } else { '$' }
     }
 
@@ -138,7 +148,7 @@ impl GameState {
 
         for piece_y in 0..self.piece_height {
             for piece_x in 0..self.piece_width {
-                if self.piece[piece_y][piece_x] == '*' {
+                if self.piece[piece_y][piece_x] == 'O' {
                     let by = board_y + piece_y as i32;
                     let bx = board_x + piece_x as i32;
 
@@ -168,24 +178,25 @@ impl GameState {
 
     fn score_position(&self, board_y: i32, board_x: i32) -> i32 {
         let mut score = 0;
-
-        // Calculate center of mass for preference
-        let center_y = self.board_height / 2;
-        let center_x = self.board_width / 2;
+        let mut piece_cells = 0;
+        let mut min_dist_to_opponent = i32::MAX;
 
         for piece_y in 0..self.piece_height {
             for piece_x in 0..self.piece_width {
-                if self.piece[piece_y][piece_x] == '*' {
-                    let by = (board_y + piece_y as i32) as usize;
-                    let bx = (board_x + piece_x as i32) as usize;
+                if self.piece[piece_y][piece_x] == 'O' {
+                    let by = board_y + piece_y as i32;
+                    let bx = board_x + piece_x as i32;
 
-                    // Prefer blocking opponent
+                    piece_cells += 1;
+
+                    // Count adjacent cells
                     let mut adjacent_opponent = 0;
                     let mut adjacent_empty = 0;
+                    let mut adjacent_my_territory = 0;
 
                     for (dy, dx) in &[(-1i32, 0i32), (1, 0), (0, -1), (0, 1)] {
-                        let ny = by as i32 + dy;
-                        let nx = bx as i32 + dx;
+                        let ny = by + dy;
+                        let nx = bx + dx;
 
                         if ny >= 0 && ny < self.board_height as i32 && nx >= 0 && nx < self.board_width as i32 {
                             let neighbor = self.board[ny as usize][nx as usize];
@@ -193,45 +204,67 @@ impl GameState {
                                 adjacent_opponent += 1;
                             } else if neighbor == '.' {
                                 adjacent_empty += 1;
+                            } else if self.is_my_cell(neighbor) {
+                                adjacent_my_territory += 1;
                             }
                         }
                     }
 
-                    // Reward being near opponent (for blocking)
-                    score += adjacent_opponent * 10;
+                    // Find closest opponent cell
+                    for oy in 0..self.board_height {
+                        for ox in 0..self.board_width {
+                            if self.is_opponent_cell(self.board[oy][ox]) {
+                                let dist = (by - oy as i32).abs() + (bx - ox as i32).abs();
+                                min_dist_to_opponent = min_dist_to_opponent.min(dist);
+                            }
+                        }
+                    }
 
-                    // Reward expansion into empty spaces
-                    score += adjacent_empty * 3;
+                    // Scoring strategy:
+                    // 1. Aggressively move toward opponent (most important)
+                    score -= min_dist_to_opponent * 50;
 
-                    // Slight preference for center positions
-                    let dist_from_center = (by as i32 - center_y as i32).abs() + (bx as i32 - center_x as i32).abs();
-                    score -= dist_from_center / 2;
+                    // 2. Reward blocking opponent
+                    score += adjacent_opponent * 100;
+
+                    // 3. Reward expanding territory
+                    score += adjacent_empty * 10;
+
+                    // 4. Avoid clustering too much
+                    score -= adjacent_my_territory * 5;
                 }
             }
         }
+
+        // Prefer larger pieces when scores are equal
+        score += piece_cells * 2;
 
         score
     }
 
     fn find_best_move(&self) -> Position {
-        let mut best_pos = Position { x: 0, y: 0 };
         let mut best_score = i32::MIN;
-        let mut found_valid = false;
+        let mut best_pos = Position { x: 0, y: 0 };
+        let mut found_valid_move = false;
 
-        for board_y in -(self.piece_height as i32)..=(self.board_height as i32) {
-            for board_x in -(self.piece_width as i32)..=(self.board_width as i32) {
+        for board_y in 0..self.board_height as i32 {
+            for board_x in 0..self.board_width as i32 {
                 if self.can_place_piece(board_y, board_x) {
+                    found_valid_move = true;
                     let score = self.score_position(board_y, board_x);
-                    if !found_valid || score > best_score {
+                    if score > best_score {
                         best_score = score;
                         best_pos = Position {
                             x: board_x as usize,
                             y: board_y as usize,
                         };
-                        found_valid = true;
                     }
                 }
             }
+        }
+
+        if !found_valid_move {
+            eprintln!("No valid move found!");
         }
 
         best_pos
@@ -246,7 +279,7 @@ fn main() {
         match game.read_input() {
             Ok(true) => {
                 let best_move = game.find_best_move();
-                println!("{} {}", best_move.y, best_move.x);
+                println!("{} {}", best_move.x, best_move.y);
                 io::stdout().flush().unwrap();
             }
             Ok(false) => {
